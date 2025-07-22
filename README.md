@@ -396,7 +396,7 @@ The example we covered showed that the action layer is your attack surface. Your
 [User Input] → [LLM] → [Output] → [Interpreter] → [Real World Effects]
 
 An LLM doesn’t execute code or perform actions – it generates text. **That’s it.** Any real-world impact comes from whatever system consumes and acts on that text.
-In other words, the thing that makes LLMs useful is the ability to call tools && having access to relevant data. 
+In other words, the what makes LLMs useful is the ability to call tools && having access to relevant data. 
 
 Guess what happens when you chain these processes together? 
 
@@ -432,4 +432,4 @@ By adopting these principles, you make your AI integrations **incapable** of mis
 
 Prompt Injection shouldn't even be considered a vulnerability. It’s like claiming SQL Injection when you're already inside the SQL command interpreter. 
 
-**That's not injection, that's just using it as expected.**
+#### **That's not injection, that's just using it as expected.**
