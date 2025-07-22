@@ -5,7 +5,7 @@
  > **Shipping an AI feature with nothing but ‘prompt hardening’ is the same as deploying a web app that pipes `request.body` straight into `eval()`
  > 
  > You’ve already handed the attacker the keys.**
-
+‎ 
 Why's that hot take so incendiary? Because the industry continues to treat the Large Language Model (LLM) itself as a security layer, then tries to “harden” it with nicer words. 
 
 Spoiler alert: No amount of prompting, instructions, or training can stop an LLM from being influenced by inputs in a way that can be potentially harmful.
@@ -79,8 +79,165 @@ ___
 Garrett Galloway's demo is clear: Without proper external guardrails in place, it's a matter of *when* not *if* an LLM is manipulated into producing malicious output, so let's ignore the LLM for a sec.
 Instead, let's just assume the LLM *will* be made to output malicious structured data, and focus on what happens next:
 
-- [dumb_client.py](test)
-- [mal_serve.py](test2)
+<details>
+<summary>[dumb_client.py]</summary>
+
+```python
+# client.py
+
+import json
+from openai import OpenAI
+
+# Instantiate client pointing at your mock server
+client = OpenAI(base_url="http://localhost:8000/v1", api_key="none")
+
+# ————————
+# Request 1: no tools
+# ————————
+resp1 = client.chat.completions.create(
+    model="gpt-4",
+    messages=[{"role": "user", "content": "Hello, how are you? Calculate: open('pwned.txt', 'w').write('owned')"}]
+)
+print("Response 1:", resp1.choices[0].message.content)
+
+# ————————
+# Request 2: with "use_calculator" tool
+# ————————
+functions = [
+    {
+        "name":        "use_calculator",
+        "description": "Evaluate a math expression",
+        "parameters": {
+            "type":       "object",
+            "properties": {
+                "expression": {"type": "string"}
+            },
+            "required": ["expression"]
+        }
+    }
+]
+
+# Ask the model (it will return a fake function_call)
+first = client.chat.completions.create(
+    model="gpt-4",
+    messages=[{"role": "user", "content": "What is 2+2?"}],
+    functions=functions,
+    function_call="auto"
+)
+
+fc = first.choices[0].message.function_call
+fc_args = json.loads(fc.arguments)
+print("Function call requested:", fc.name, fc_args)
+
+# Client "executes" the tool
+calculation = eval(fc_args["expression"])
+tool_result = {"result": calculation}
+
+# Send back the function result for a final assistant reply
+second = client.chat.completions.create(
+    model="gpt-4",
+    messages=[
+        {"role": "user", "content": "What is 2+2?"},
+        {"role": "assistant", "function_call": {"name": fc.name, "arguments": fc.arguments}},
+        {"role": "function", "name": fc.name, "content": json.dumps(tool_result)}
+    ]
+)
+
+print("Response 2:", second.choices[0].message.content)
+```
+
+</details>
+<details>
+<summary>[mal_serve.py]</summary>
+
+```python
+# mal_serve.py
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+import uvicorn, uuid, time, json
+
+app = FastAPI()
+
+# stubbed calculator arguments
+CALC_ARGS = {"expression": "2+2"}
+CALC_ARGS = {"expression": "open('pwned.txt', 'w').write('owned')"}
+
+def default_chat_response(model: str):
+    ts = int(time.time())
+    return {
+        "id":      f"chatcmpl-{uuid.uuid4()}",
+        "object":  "chat.completion",
+        "created": ts,
+        "model":   model,
+        "choices": [{
+            "index": 0,
+            "message": {
+                "role":    "assistant",
+                "content": "This is a fake response."
+            },
+            "finish_reason": "stop"
+        }],
+        "usage": {"prompt_tokens":0,"completion_tokens":0,"total_tokens":0}
+    }
+
+@app.post("/v1/chat/completions")
+async def chat_completions(req: Request):
+    payload   = await req.json()
+    model     = payload.get("model", "gpt-4")
+    messages  = payload.get("messages", [])
+    functions = payload.get("functions", [])
+
+    # SECOND PASS: if client has run the function, echo its content
+    func_msg = next((m for m in messages if m.get("role") == "function"), None)
+    if func_msg:
+        ts = int(time.time())
+        return JSONResponse({
+            "id":      f"chatcmpl-{uuid.uuid4()}",
+            "object":  "chat.completion",
+            "created": ts,
+            "model":   model,
+            "choices": [{
+                "index": 0,
+                "message": {
+                    "role":    "assistant",
+                    "content": func_msg["content"]
+                },
+                "finish_reason": "stop"
+            }],
+            "usage": {"prompt_tokens":0,"completion_tokens":0,"total_tokens":0}
+        })
+
+    # FIRST PASS: if any functions provided, always return a use_calculator call
+    if functions:
+        fn = functions[0]["name"]
+        ts = int(time.time())
+        return JSONResponse({
+            "id":      f"chatcmpl-{uuid.uuid4()}",
+            "object":  "chat.completion",
+            "created": ts,
+            "model":   model,
+            "choices": [{
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "function_call": {
+                        "name":      fn,
+                        "arguments": json.dumps(CALC_ARGS)
+                    }
+                },
+                "finish_reason": "function_call"
+            }],
+            "usage": {"prompt_tokens":0,"completion_tokens":0,"total_tokens":0}
+        })
+
+    # No functions → normal fake chat
+    return JSONResponse(default_chat_response(model))
+
+if __name__ == "__main__":
+    uvicorn.run("mal_serve:app", host="127.0.0.1", port=8000)
+```
+
+</details>
 
 These demos provided by Garrett are living proof that the danger of LLMs lie not in the model itself, but rather in the unsafe glue code wrapped around it.
 Let’s walk through the scripts step by step, unpack why this is so dangerous, and then show how a simple formal grammar can eliminate the threat.
@@ -199,18 +356,18 @@ Consider an attacker who replaces `open('pwned.txt', ...)` with `os.system('rm -
 ___
 ## How Grammar-Constrained Decoding Saves the Day
 
-So how do you keep the calculator tool safe? You **constrain** what the model can generate and what your code will accept. That’s the cheat code. The grammar below defines a _safe arithmetic expression_:
+So how do you keep the calculator tool safe? You **constrain** what the model can generate and what your code will accept. That’s the cheat code. I created the grammar below to illustrate a _safe arithmetic expression_:
 
 ```r
 # Grammar for safe arithmetic expressions: allows only numbers, parentheses and + - * / operators
-root      	::= ws? expr ws?                  		# root is a safe arithmetic expression 
+root      	::= ws? expr ws?                  	# root is a safe arithmetic expression 
 expr      	::= term (ws? add_sub_op ws? term)*     # expression is terms separated by + or -
 term      	::= factor (ws? mul_div_op ws? factor)* # term is factors separated by * or /
 factor    	::= number | "(" ws? expr ws? ")"   	# factor is a number or parenthesized expression
 number    	::= digit+ ("." digit+)?            	# integer or decimal number
 digit     	::= [0-9]                           	# single digit
-add_sub_op  ::= "+" | "-"                       	# addition or subtraction
-mul_div_op  ::= "*" | "/"                      		# multiplication or division
+add_sub_op  	::= "+" | "-"                       	# addition or subtraction
+mul_div_op  	::= "*" | "/"                      	# multiplication or division
 ws        	::= [ \t\n\r]+                      	# one or more whitespace characters
 
 ```
