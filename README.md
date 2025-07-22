@@ -1,6 +1,7 @@
 # Hot take: Prompt Hardening is a Band-Aid, not a solution.
 
-> Shipping an AI feature with nothing but ‘prompt hardening’ is the same as deploying a web app that pipes `request.body` straight into `eval()      `You’ve already handed the attacker the keys.
+> Shipping an AI feature with nothing but ‘prompt hardening’ is the same as deploying a web app that pipes `request.body` straight into `eval()`
+> You’ve already handed the attacker the keys.
 
 Why's that hot take so incendiary? Because the industry continues to treat the Large Language Model (LLM) itself as a security layer, then tries to “harden” it with nicer words.
 
