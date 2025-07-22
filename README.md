@@ -428,7 +428,7 @@ As Garrett says: **Treat LLM output like garbage. It is.**
 
 By adopting these principles, you make your AI integrations **incapable** of misbehaving rather than simply *asking* them to behave nicely with defensive prompting. That’s not a hot take—it’s the only sane way to build secure, reliable systems.
 
-###### And an even hotter take?
+### And an even hotter take?
 
 Prompt Injection shouldn't even be considered a vulnerability. It’s like claiming SQL Injection when you're already inside the SQL command interpreter. 
 
